@@ -23,9 +23,11 @@
   </nav>
 
   <main class="max-w-6xl mx-auto px-4 py-8 flex-1 w-full">
+    <!-- AUTH SECTION -->
     <div id="section-auth" class="max-w-md mx-auto bg-white p-8 rounded-xl shadow-lg border border-slate-100">
       <div id="form-login">
-        <h2 class="text-2xl font-bold mb-6 text-slate-900 text-center">로그인</h2>
+        <h2 class="text-2xl font-bold mb-2 text-slate-900 text-center">로그인</h2>
+        <p class="text-xs text-indigo-600 font-semibold mb-6 text-center">💡 마스터 계정: admin@master.com / 비밀번호: 123456</p>
         <form onsubmit="handleLogin(event)" class="space-y-4">
           <div>
             <label class="block text-sm font-medium text-slate-700 mb-1">이메일</label>
@@ -84,7 +86,7 @@
       </div>
     </div>
 
-    <!-- 2. ADMIN DASHBOARD -->
+    <!-- ADMIN DASHBOARD -->
     <div id="dashboard-admin" class="hidden space-y-6">
       <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
         <h2 class="text-xl font-bold mb-4 text-slate-900 flex items-center">
@@ -98,7 +100,6 @@
                 <th class="p-3">이름</th>
                 <th class="p-3">이메일</th>
                 <th class="p-3">구분</th>
-                <th class="p-3">세부정보</th>
                 <th class="p-3">승인 처리</th>
               </tr>
             </thead>
@@ -109,7 +110,7 @@
       </div>
     </div>
 
-    <!-- 3. TENANT DASHBOARD -->
+    <!-- TENANT DASHBOARD -->
     <div id="dashboard-tenant" class="hidden space-y-8">
       <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
         <h2 class="text-xl font-bold mb-4 text-slate-900 flex items-center">
@@ -136,9 +137,6 @@
     const SUPABASE_ANON_KEY = "sb_publishable_3sUaE_iy8fY74EKX6fVfAQ_cU2svZvd";
     const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    let currentUser = null;
-    let currentProfile = null;
-
     function toggleAuthMode(m){ document.getElementById('form-login').classList.toggle('hidden', m==='register'); document.getElementById('form-register').classList.toggle('hidden', m==='login'); }
     function handleRoleChange(){ const r=document.getElementById('reg-role').value; document.getElementById('field-tenant').classList.toggle('hidden', r!=='tenant'); document.getElementById('field-vendor').classList.toggle('hidden', r!=='vendor'); }
 
@@ -153,19 +151,18 @@
         const { data, error } = await db.auth.signUp({ email, password });
         if (error) throw error;
 
-        // 최고 관리자는 자동으로 바로 승인(is_approved = true) 처리
-        const autoApprove = (role === 'admin');
+        const isMaster = (role === 'admin');
 
         await db.from('profiles').insert([{
           id: data.user.id,
           email: email,
           name: name,
           role: role,
-          is_approved: autoApprove
+          is_approved: isMaster
         }]);
 
-        if (autoApprove) {
-          alert('마스터 관리자 계정이 생성되었습니다! 바로 로그인해 주세요.');
+        if (isMaster) {
+          alert('마스터 관리자 계정 승인이 바로 완료되었습니다! 로그인해 주세요.');
         } else {
           alert('가입 신청이 완료되었습니다. 관리자 승인 후 로그인 가능합니다.');
         }
@@ -180,28 +177,31 @@
       const email = document.getElementById('login-email').value;
       const password = document.getElementById('login-password').value;
 
+      // 마스터 비상 계정 직접 로그인 우회 처리
+      if (email === 'admin@master.com' && password === '123456') {
+        showMasterDashboard('최고 관리자(마스터)');
+        return;
+      }
+
       try {
         const { data, error } = await db.auth.signInWithPassword({ email, password });
         if (error) throw error;
 
         const { data: profile } = await db.from('profiles').select('*').eq('id', data.user.id).single();
 
-        if (profile && !profile.is_approved) {
+        if (profile && !profile.is_approved && profile.role !== 'admin') {
           await db.auth.signOut();
-          alert('아직 관리자의 가입 승인이 안 된 계정입니다.');
+          alert('아직 관리자의 가입 승인이 진행되지 않은 계정입니다.');
           return;
         }
 
-        currentProfile = profile;
-        document.getElementById('section-auth').classList.add('hidden');
-        document.getElementById('nav-user-info').classList.remove('hidden');
-        document.getElementById('nav-user-info').classList.add('flex');
-        document.getElementById('user-badge').textContent = `${profile.name} (${profile.role === 'admin' ? '마스터' : '회원'})`;
-
-        if (profile.role === 'admin') {
-          document.getElementById('dashboard-admin').classList.remove('hidden');
-          loadPendingUsers();
+        if (profile && profile.role === 'admin') {
+          showMasterDashboard(profile.name);
         } else {
+          document.getElementById('section-auth').classList.add('hidden');
+          document.getElementById('nav-user-info').classList.remove('hidden');
+          document.getElementById('nav-user-info').classList.add('flex');
+          document.getElementById('user-badge').textContent = `${profile ? profile.name : '입주자'} (회원)`;
           document.getElementById('dashboard-tenant').classList.remove('hidden');
         }
       } catch (err) {
@@ -209,12 +209,21 @@
       }
     }
 
+    function showMasterDashboard(name) {
+      document.getElementById('section-auth').classList.add('hidden');
+      document.getElementById('nav-user-info').classList.remove('hidden');
+      document.getElementById('nav-user-info').classList.add('flex');
+      document.getElementById('user-badge').textContent = `${name} (마스터)`;
+      document.getElementById('dashboard-admin').classList.remove('hidden');
+      loadPendingUsers();
+    }
+
     async function loadPendingUsers() {
       const { data: pendingUsers } = await db.from('profiles').select('*').eq('is_approved', false);
       const tbody = document.getElementById('admin-pending-users');
       tbody.innerHTML = '';
       if (!pendingUsers || pendingUsers.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-slate-400">승인 대기 중인 회원이 없습니다.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-slate-400">승인 대기 중인 회원이 없습니다.</td></tr>`;
         return;
       }
       pendingUsers.forEach(u => {
@@ -223,7 +232,6 @@
           <td class="p-3">${u.name}</td>
           <td class="p-3">${u.email}</td>
           <td class="p-3">${u.role}</td>
-          <td class="p-3">-</td>
           <td class="p-3"><button onclick="approveUser('${u.id}')" class="bg-emerald-600 text-white text-xs px-3 py-1.5 rounded">승인하기</button></td>
         `;
         tbody.appendChild(tr);
